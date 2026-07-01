@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <style>
+        html, body {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100vh;
+            min-height: 100vh;
+            overflow: hidden;
+            background: #f8f9fa;
+            font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        }
+
+        #map-shell {
+            position: relative;
+            width: 100%;
+            height: 100vh;
+            min-height: 100vh;
+            background: #f8f9fa;
+        }
+
+        #turkey-map-image,
+        #svg-host {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            border: 0;
+            background: transparent;
+        }
+
+        #svg-host {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        #svg-host svg {
+            display: block;
+            width: 100%;
+            height: 100%;
+            max-width: 100%;
+            max-height: 100%;
+        }
+
+        #svg-host [data-iladi] path {
+            fill: rgba(43, 45, 66, 0.12);
+            stroke: #7a8191;
+            stroke-width: 1px;
+            vector-effect: non-scaling-stroke;
+        }
+
+        #turkey-map-image {
+            display: none;
+            object-fit: contain;
+            pointer-events: none;
+        }
+
+        #status {
+            position: absolute;
+            left: 10px;
+            right: 10px;
+            bottom: 8px;
+            padding: 7px 10px;
+            border-radius: 8px;
+            background: rgba(255, 255, 255, 0.94);
+            color: #2b2d42;
+            font-size: 12px;
+            line-height: 16px;
+            box-shadow: 0 2px 10px rgba(43, 45, 66, 0.08);
+            pointer-events: none;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        #fallback {
+            display: none;
+            width: 100%;
+            height: 100%;
+            align-items: center;
+            justify-content: center;
+            color: #2b2d42;
+            font-size: 13px;
+            text-align: center;
+            padding: 16px;
+            box-sizing: border-box;
+        }
+    </style>
+</head>
+<body>
+    <div id="map-shell">
+        <img id="turkey-map-image" src="map/turkey.svg" alt="Türkiye haritası" />
+        <div id="svg-host" aria-label="Türkiye haritası">
+            <!-- ATLAS_TURKEY_SVG -->
+        </div>
+        <div id="fallback">Türkiye haritası yüklenemedi.</div>
+        <div id="status">Şehir seçmek için haritaya dokunun</div>
+    </div>
+
+    <script>
+        (function () {
+            const svgHost = document.getElementById("svg-host");
+            const mapImage = document.getElementById("turkey-map-image");
+            const mapShell = document.getElementById("map-shell");
+            const fallback = document.getElementById("fallback");
+            const statusEl = document.getElementById("status");
+            let selectedGroup = null;
+            let mapState = { selectedCity: "", cities: [] };
+
+            function resizeMapShell() {
+                const height = Math.max(window.innerHeight || document.documentElement.clientHeight || 0, 220);
+                [document.documentElement, document.body, mapShell, svgHost].forEach(function (element) {
+                    element.style.height = height + "px";
+                    element.style.minHeight = height + "px";
+                });
+            }
+
+            function setStatus(text) {
+                statusEl.textContent = text;
+            }
+
+            function normalizeCity(cityName) {
+                return String(cityName || "").trim().replace(/\s*\((Asya|Avrupa)\)$/i, "");
+            }
+
+            function getCityStats(cityName) {
+                const normalized = normalizeCity(cityName);
+                return mapState.cities.find(function (item) {
+                    return normalizeCity(item.city).toLocaleLowerCase("tr-TR") === normalized.toLocaleLowerCase("tr-TR");
+                });
+            }
+
+            function stylePaths(group, fill, stroke, width) {
+                const paths = group.querySelectorAll("path");
+                paths.forEach(function (path) {
+                    path.style.fill = fill;
+                    path.style.stroke = stroke;
+                    path.style.strokeWidth = width;
+                    path.style.transition = "fill 140ms ease, stroke-width 140ms ease";
+                });
+            }
+
+            function applyState(rootNode) {
+                const root = rootNode || svgHost;
+                const provinceGroups = root.querySelectorAll("[data-iladi]");
+                provinceGroups.forEach(function (group) {
+                    const cityName = group.getAttribute("data-iladi");
+                    const filterName = normalizeCity(cityName);
+                    const stats = getCityStats(filterName);
+                    const isSelected = normalizeCity(mapState.selectedCity).toLocaleLowerCase("tr-TR") === filterName.toLocaleLowerCase("tr-TR");
+                    const hasContent = stats && ((stats.eventsCount || 0) + (stats.projectsCount || 0) > 0);
+
+                    if (isSelected) {
+                        selectedGroup = group;
+                        stylePaths(group, "rgba(217, 4, 41, 0.42)", "#d90429", "2.2");
+                    } else if (hasContent) {
+                        stylePaths(group, "rgba(239, 35, 60, 0.24)", "#d90429", "1.4");
+                    } else {
+                        stylePaths(group, "rgba(43, 45, 66, 0.08)", "#8d99ae", "0.9");
+                    }
+                });
+            }
+
+            function wireSvg(rootNode) {
+                const svg = rootNode.querySelector("svg");
+                if (!svg) {
+                    showFallback();
+                    return;
+                }
+
+                svg.setAttribute("width", "100%");
+                svg.setAttribute("height", "100%");
+                svg.setAttribute("preserveAspectRatio", "xMidYMid meet");
+                svg.style.display = "block";
+                svg.style.width = "100%";
+                svg.style.height = "100%";
+
+                const provinceGroups = rootNode.querySelectorAll("[data-iladi]");
+                provinceGroups.forEach(function (group) {
+                    const cityName = group.getAttribute("data-iladi");
+                    const filterName = normalizeCity(cityName);
+                    group.style.cursor = "pointer";
+                    group.style.pointerEvents = "auto";
+
+                    group.addEventListener("mouseenter", function () {
+                        if (group !== selectedGroup) {
+                            stylePaths(group, "rgba(239, 35, 60, 0.28)", "#d90429", "1.6");
+                        }
+                    });
+
+                    group.addEventListener("mouseleave", function () {
+                        if (group !== selectedGroup) {
+                            applyState(rootNode);
+                        }
+                    });
+
+                    group.addEventListener("click", function () {
+                        if (selectedGroup && selectedGroup !== group) {
+                            applyState(rootNode);
+                        }
+                        selectedGroup = group;
+                        mapState.selectedCity = filterName;
+                        stylePaths(group, "rgba(217, 4, 41, 0.38)", "#d90429", "2");
+                        const stats = getCityStats(filterName);
+                        const total = stats ? ((stats.eventsCount || 0) + (stats.projectsCount || 0)) : 0;
+                        setStatus(filterName + " seçildi" + (total ? " - " + total + " kayıt" : ""));
+
+                        if (window.AndroidInterface && window.AndroidInterface.onCitySelected) {
+                            window.AndroidInterface.onCitySelected(filterName);
+                        }
+                    });
+                });
+
+                applyState(rootNode);
+                if (window.AndroidInterface && window.AndroidInterface.onMapReady) {
+                    window.AndroidInterface.onMapReady();
+                }
+            }
+
+            function showFallback() {
+                svgHost.style.display = "none";
+                mapImage.style.display = "none";
+                fallback.style.display = "flex";
+                setStatus("Harita yüklenemedi");
+                if (window.AndroidInterface && window.AndroidInterface.onMapError) {
+                    window.AndroidInterface.onMapError("SVG haritası yüklenemedi");
+                }
+            }
+
+            function showImageFallback() {
+                svgHost.style.display = "none";
+                mapImage.style.display = "block";
+                fallback.style.display = "none";
+                setStatus("Harita görseli yüklendi");
+                if (window.AndroidInterface && window.AndroidInterface.onMapError) {
+                    window.AndroidInterface.onMapError("Etkileşimli SVG erişilemedi");
+                }
+            }
+
+            window.setAtlasMapState = function (state) {
+                mapState = state || { selectedCity: "", cities: [] };
+                try {
+                    applyState(svgHost);
+                    const selected = normalizeCity(mapState.selectedCity);
+                    if (selected) {
+                        setStatus(selected + " filtresi aktif");
+                    } else {
+                        setStatus("Şehir seçmek için haritaya dokunun");
+                    }
+                } catch (error) {
+                    if (window.AndroidInterface && window.AndroidInterface.onMapError) {
+                        window.AndroidInterface.onMapError("Harita durumu uygulanamadı");
+                    }
+                }
+            };
+
+            resizeMapShell();
+            window.addEventListener("resize", resizeMapShell);
+
+            if (svgHost.querySelector("svg")) {
+                wireSvg(svgHost);
+            } else {
+                showImageFallback();
+            }
+            mapImage.addEventListener("error", showFallback);
+        })();
+    </script>
+</body>
+</html>
